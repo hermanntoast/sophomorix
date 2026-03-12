@@ -1307,6 +1307,43 @@ sub AD_user_kill {
                                                                  $role_AD,
                                                                  $ref_sophomorix_config);
 
+              # Remove DOS READONLY attributes before deltree.
+              # Windows folder redirection (GPO) sets READONLY on redirected
+              # folders (Documents, Pictures, etc.) and subfolders (Camera Roll,
+              # Saved Pictures, Links). Newer Samba versions (4.15+) enforce
+              # this attribute, causing deltree to fail with
+              # NT_STATUS_CANNOT_DELETE.
+              my $smb_rel_path_bs=$smb_rel_path;
+              $smb_rel_path_bs=~s/\//\\/g;
+              my $list_cmd=$ref_sophomorix_config->{'INI'}{'EXECUTABLES'}{'SMBCLIENT'}.
+                  " --debuglevel=0 -U ".$DevelConf::sophomorix_file_admin."%'******' ".
+                  $unc." -c 'recurse ON; ls \"$smb_rel_path_bs\\*\"'";
+              my $list_cmd_real=$list_cmd;
+              $list_cmd_real=~s/\*\*\*\*\*\*/$smb_admin_pass/;
+              my $list_output=`$list_cmd_real 2>/dev/null`;
+              my @dirs_to_fix=($smb_rel_path);
+              foreach my $line (split("\n", $list_output)) {
+                  if ($line =~ /^\\(.+?)\s*$/) {
+                      my $dir=$1;
+                      $dir=~s/\\/\//g;
+                      push @dirs_to_fix, $dir;
+                  }
+              }
+              if (scalar(@dirs_to_fix) > 0) {
+                  my $setmode_str="";
+                  foreach my $dir (@dirs_to_fix) {
+                      $setmode_str.="setmode \"$dir\" -r; ";
+                  }
+                  my $setmode_cmd=$ref_sophomorix_config->{'INI'}{'EXECUTABLES'}{'SMBCLIENT'}.
+                      " --debuglevel=0 -U ".$DevelConf::sophomorix_file_admin."%'******' ".
+                      $unc." -c '".$setmode_str."'";
+                  my $setmode_cmd_real=$setmode_cmd;
+                  $setmode_cmd_real=~s/\*\*\*\*\*\*/$smb_admin_pass/;
+                  `$setmode_cmd_real 2>/dev/null`;
+                  print "   Removed READONLY from ".scalar(@dirs_to_fix)." directories in $smb_rel_path\n";
+              }
+
+              # smbclient deltree
               my $smbclient_command=$ref_sophomorix_config->{'INI'}{'EXECUTABLES'}{'SMBCLIENT'}.
                         " --debuglevel=0 -U ".$DevelConf::sophomorix_file_admin."%'******' ".
                         $unc." -c 'deltree \"$smb_rel_path\";'";
@@ -1316,7 +1353,7 @@ sub AD_user_kill {
                   print "OK: Deleted with succes $smb_home\n";
               } else {
                   $home_delete_string="FALSE";
-                  print "ERROR: rmdir_recurse $smb_home $!\n";
+                  print "ERROR: deltree $smb_home $!\n";
               }
         }
 
@@ -9429,6 +9466,37 @@ sub AD_examuser_kill {
         my ($smb_server,
             $smb_rel_path)=&Sophomorix::SophomorixBase::smb_share_subpath_from_homedir_attr($home_directory_AD,
                                                                                             $school_AD);
+        # Remove DOS READONLY attributes before deltree (see AD_user_kill)
+        my $smb_rel_path_bs=$smb_rel_path;
+        $smb_rel_path_bs=~s/\//\\/g;
+        my $list_cmd=$ref_sophomorix_config->{'INI'}{'EXECUTABLES'}{'SMBCLIENT'}.
+            " --debuglevel=0 -U ".$DevelConf::sophomorix_file_admin."%'******' ".
+            $smb_server." -c 'recurse ON; ls \"$smb_rel_path_bs\\*\"'";
+        my $list_cmd_real=$list_cmd;
+        $list_cmd_real=~s/\*\*\*\*\*\*/$smb_admin_pass/;
+        my $list_output=`$list_cmd_real 2>/dev/null`;
+        my @dirs_to_fix=($smb_rel_path);
+        foreach my $line (split("\n", $list_output)) {
+            if ($line =~ /^\\(.+?)\s*$/) {
+                my $dir=$1;
+                $dir=~s/\\/\//g;
+                push @dirs_to_fix, $dir;
+            }
+        }
+        if (scalar(@dirs_to_fix) > 0) {
+            my $setmode_str="";
+            foreach my $dir (@dirs_to_fix) {
+                $setmode_str.="setmode \"$dir\" -r; ";
+            }
+            my $setmode_cmd=$ref_sophomorix_config->{'INI'}{'EXECUTABLES'}{'SMBCLIENT'}.
+                " --debuglevel=0 -U ".$DevelConf::sophomorix_file_admin."%'******' ".
+                $smb_server." -c '".$setmode_str."'";
+            my $setmode_cmd_real=$setmode_cmd;
+            $setmode_cmd_real=~s/\*\*\*\*\*\*/$smb_admin_pass/;
+            `$setmode_cmd_real 2>/dev/null`;
+            print "   Removed READONLY from ".scalar(@dirs_to_fix)." directories in $smb_rel_path\n";
+        }
+
         my $smbclient_command=$ref_sophomorix_config->{'INI'}{'EXECUTABLES'}{'SMBCLIENT'}.
             " --debuglevel=0 -U ".$DevelConf::sophomorix_file_admin."%'******' ".
             $smb_server." -c 'deltree \"$smb_rel_path\";'";
